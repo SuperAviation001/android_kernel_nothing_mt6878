@@ -829,7 +829,6 @@ static void set_gain(struct ics_haptic_data *haptic_data, int16_t gain)
 	reg_val = (gain * 128) / 0x7fff;
 
 	haptic_data->func->set_gain(haptic_data, reg_val);
-	haptic_data->chip_config.gain = reg_val;
 }
 
 static int upload_constant_effect(struct ics_haptic_data *haptic_data,

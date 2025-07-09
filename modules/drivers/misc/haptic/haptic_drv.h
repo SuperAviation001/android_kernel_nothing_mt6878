@@ -145,6 +145,11 @@ struct ics_haptic_data
 	uint32_t nt_backup_f0;//Write the value of MMI calibration f0 in the upper layer
 	uint32_t nt_cmdline_f0;//record lk stage f0 exceeding threshold
 #ifdef ICS_INPUT_FRAMEWORK
+	struct input_dev *input_dev;
+	struct workqueue_struct *input_work_queue;
+	struct work_struct input_vibrator_work;
+	enum ics_haptic_play_mode activate_mode;
+	int32_t state;
 	bool preset_custom;
 #endif
 };
