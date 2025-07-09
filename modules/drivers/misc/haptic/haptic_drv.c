@@ -787,7 +787,7 @@ static irqreturn_t ics_haptic_irq_handler(int irq, void *data)
 		}
 	}
 
-#ifdef AAC_RICHTAP_SUPPORT
+#if IS_ENABLED(CONFIG_HAPTIC_DRV_RICHTAP)
 	ret = richtap_irq_handler(haptic_data);
 	if (ret >= 0)
 	{
@@ -1446,6 +1446,7 @@ static int32_t haptic_parse_dt(struct ics_haptic_data *haptic_data)
 		ics_info("provided device name is : %s\n", haptic_data->vib_name);
 	}
 
+#if IS_ENABLED(CONFIG_ICS_HAPTIC_DRV_RICHTAP)
 	if (of_property_read_string(dev_node, "richtap-name", &str_val))
 	{
 		ics_err("%s: can NOT find richtap name in DT!\n", __func__);
@@ -1456,6 +1457,7 @@ static int32_t haptic_parse_dt(struct ics_haptic_data *haptic_data)
 		memcpy(haptic_data->misc_name, str_val, strlen(str_val));
 		ics_info("provided richtap name is : %s\n", haptic_data->misc_name);
 	}
+#endif
 
 	return 0;
 }
@@ -1576,7 +1578,7 @@ static int ics_haptic_probe(struct i2c_client *client, const struct i2c_device_i
 	initialize_chip(haptic_data);
 
 
-#ifdef AAC_RICHTAP_SUPPORT
+#if IS_ENABLED(CONFIG_HAPTIC_DRV_RICHTAP)
 	ret = richtap_misc_register(haptic_data);
 	if (ret < 0)
 	{
@@ -1635,7 +1637,7 @@ static int ics_haptic_remove(struct i2c_client *client)
 {
 	struct ics_haptic_data *haptic_data = i2c_get_clientdata(client);
 
-#ifdef AAC_RICHTAP_SUPPORT
+#if IS_ENABLED(CONFIG_HAPTIC_DRV_RICHTAP)
 	richtap_misc_remove(haptic_data);
 #endif
 	cancel_work_sync(&haptic_data->preset_work);

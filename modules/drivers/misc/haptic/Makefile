@@ -8,4 +8,7 @@
 obj-$(CONFIG_HAPTIC_DRV)		+= haptic.o
 haptic-y		:= haptic_drv.o \
 	                   rt6010.o \
-					   richtap_drv.o
+
+ifeq ($(CONFIG_HAPTIC_DRV_RICHTAP),y)
+haptic-y += richtap_drv.o
+endif
