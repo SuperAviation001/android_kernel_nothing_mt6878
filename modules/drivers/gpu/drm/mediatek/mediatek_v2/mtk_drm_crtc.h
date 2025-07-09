@@ -1144,6 +1144,8 @@ struct mtk_drm_crtc {
 	unsigned int usage_ovl_weight[OVL_LAYER_NR];
 
 	bool is_plane0_updated;
+
+	bool hbm_requested;
 };
 
 enum BL_GAMMA_GAIN {

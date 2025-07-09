@@ -11560,6 +11560,55 @@ static int mtk_dsi_set_partial_update(struct mtk_ddp_comp *comp,
 	return 0;
 }
 
+static ssize_t hbm_show(struct device *dev, struct device_attribute *attr,
+			char *buf)
+{
+	struct mtk_dsi *dsi = dev_get_drvdata(dev);
+	struct mtk_panel_ext *ext = dsi->ext;
+	bool hbm = false;
+	if (ext && ext->funcs && ext->funcs->hbm_get_state)
+		ext->funcs->hbm_get_state(dsi->panel, &hbm);
+	else
+		DDPPR_ERR("%s: hbm_get_state is NULL\n", __func__);
+	return scnprintf(buf, PAGE_SIZE, "%d\n", hbm);
+}
+static ssize_t hbm_store(struct device *dev, struct device_attribute *attr,
+			 const char *buf, size_t count)
+{
+	struct mtk_dsi *dsi = dev_get_drvdata(dev);
+	struct drm_crtc *crtc = dsi->encoder.crtc;
+	struct mtk_drm_crtc *mtk_crtc = to_mtk_crtc(crtc);
+	bool hbm_en = false;
+	int ret = 0;
+	ret = kstrtobool(buf, &hbm_en);
+	if (ret)
+		return ret;
+	mtk_crtc->hbm_requested = hbm_en;
+	ret = mtk_drm_crtc_set_panel_hbm(crtc, hbm_en);
+	if (ret)
+		return ret;
+	return count;
+}
+static DEVICE_ATTR_RW(hbm);
+// Initialization
+static struct attribute *mtk_dsi_attrs[] = {
+	&dev_attr_hbm.attr,
+	NULL,
+};
+static const struct attribute_group mtk_dsi_attr_group = {
+	.attrs = mtk_dsi_attrs,
+};
+static int mtk_dsi_sysfs_init(struct mtk_dsi *dsi)
+{
+	int ret = 0;
+	ret = sysfs_create_group(&dsi->dev->kobj, &mtk_dsi_attr_group);
+	if (ret) {
+		DDPPR_ERR("%s: failed to create sysfs group\n", __func__);
+		return ret;
+	}
+	return 0;
+}
+
 static const struct mtk_ddp_comp_funcs mtk_dsi_funcs = {
 	.config = mtk_dsi_ddp_config,
 	.first_cfg = mtk_dsi_first_cfg,
@@ -12195,6 +12244,11 @@ static int mtk_dsi_probe(struct platform_device *pdev)
 	}
 
 	platform_set_drvdata(pdev, dsi);
+
+	ret = mtk_dsi_sysfs_init(dsi);
+	if (ret) {
+		dev_err(dev, "Failed to initialize sysfs: %d\n", ret);
+	}
 
 	ret = component_add(&pdev->dev, &mtk_dsi_component_ops);
 	if (ret != 0) {
