@@ -1478,7 +1478,7 @@ static struct i2c_driver ics_haptic_driver = {
 	},
 	.id_table = ics_haptic_id,
 	.probe = ics_haptic_probe,
-	.remove = (void *)ics_haptic_remove,
+	.remove = ics_haptic_remove,
 };
 
 module_i2c_driver(ics_haptic_driver);
