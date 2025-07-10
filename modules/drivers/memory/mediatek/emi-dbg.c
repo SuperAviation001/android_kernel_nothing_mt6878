@@ -10,6 +10,7 @@
 #include <linux/printk.h>
 #include <linux/soc/mediatek/mtk_sip_svc.h>
 #include <soc/mediatek/emi.h>
+#include "registers.h"
 
 DEFINE_SPINLOCK(emidbg_lock);
 
