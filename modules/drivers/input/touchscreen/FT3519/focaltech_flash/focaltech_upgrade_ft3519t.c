@@ -37,6 +37,7 @@
 * Global variable or extern global variabls/functions
 *****************************************************************************/
 u8 pb_file_ft5452j[] = {
+#include "../include/pramboot/FT5452J_Pramboot_V4.1_20210427.i"
 };
 
 static int fts_ft5452j_fwupg_get_boot_state(

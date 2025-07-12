@@ -58,16 +58,6 @@ char preset_waveform_name[][MAX_PRESET_NAME_LEN] =
 	{"104_Haptic.bin"},
 	{"105_Haptic.bin"},
 };
-
-#ifdef ICS_INPUT_FRAMEWORK
-struct custom_fifo_data {
-	uint32_t idx;
-	uint32_t length;
-	uint32_t play_rate_hz;
-	uint64_t data;
-};
-#endif
-
 uint8_t flag_lra_resistance = 0;
 int32_t haptic_hw_reset(struct ics_haptic_data *haptic_data);
 static int32_t ics_str2hex(const char *str, uint32_t len,
@@ -342,8 +332,8 @@ static ssize_t activate_store(struct device *dev,
 	check_error_return(ret);
 
 	mutex_lock(&haptic_data->lock);
+	hrtimer_cancel(&haptic_data->timer);
 	haptic_data->activate_state = val;
-	haptic_data->preset_custom = false;
 	mutex_unlock(&haptic_data->lock);
 	schedule_work(&haptic_data->vibrator_work);
 
@@ -536,7 +526,6 @@ static int32_t send_stream_data(struct ics_haptic_data *haptic_data, uint32_t fi
 	return 0;
 }
 
-#if 0
 static ssize_t stream_data_store(struct device *dev,
 	struct device_attribute *attr, const char *buf, size_t count)
 {
@@ -752,7 +741,6 @@ static struct attribute *ics_haptic_attributes[] = {
 static struct attribute_group ics_haptic_attribute_group = {
 	.attrs = ics_haptic_attributes
 };
-#endif
 
 static irqreturn_t ics_haptic_irq_handler(int irq, void *data)
 {
@@ -787,7 +775,7 @@ static irqreturn_t ics_haptic_irq_handler(int irq, void *data)
 		}
 	}
 
-#if IS_ENABLED(CONFIG_HAPTIC_DRV_RICHTAP)
+#ifdef AAC_RICHTAP_SUPPORT
 	ret = richtap_irq_handler(haptic_data);
 	if (ret >= 0)
 	{
@@ -819,220 +807,6 @@ irq_exit:
 	return IRQ_HANDLED;
 }
 
-#ifdef ICS_INPUT_FRAMEWORK
-static void set_gain(struct ics_haptic_data *haptic_data, int16_t gain)
-{
-	uint8_t reg_val;
-
-	if (gain > 0x7fff)
-		gain = 0x7fff;
-	reg_val = (gain * 128) / 0x7fff;
-
-	haptic_data->func->set_gain(haptic_data, reg_val);
-}
-
-static int upload_constant_effect(struct ics_haptic_data *haptic_data,
-				  uint16_t length, int16_t magnitude)
-{
-	haptic_data->activate_mode = PLAY_MODE_RAM;
-	haptic_data->duration = length;
-	set_gain(haptic_data, magnitude);
-
-	return 0;
-}
-
-static int upload_custom_effect(struct ics_haptic_data *haptic_data,
-				int16_t __user *data, int16_t magnitude)
-{
-	struct custom_fifo_data custom_data;
-	int ret = 0;
-	u8 __user *user_wave_data;
-	u8 *tmp;
-
-	if (copy_from_user(&custom_data, data, sizeof(custom_data)))
-		return -EFAULT;
-
-	user_wave_data = (u8 __user *)custom_data.data;
-
-	mutex_lock(&haptic_data->preset_lock);
-
-	if (custom_data.length > kfifo_size(&haptic_data->stream_fifo)) {
-		kfifo_free(&haptic_data->stream_fifo);
-		ret = kfifo_alloc(&haptic_data->stream_fifo, custom_data.length, GFP_KERNEL);
-		if (ret < 0) {
-			ics_err("%s: failed to allocate kfifo for custom effect\n", __func__);
-			goto exit;
-		}
-	}
-
-	kfifo_reset(&haptic_data->stream_fifo);
-
-	tmp = kmalloc(custom_data.length, GFP_KERNEL);
-	if (!tmp) {
-		ret = -ENOMEM;
-		goto exit;
-	}
-
-	if (copy_from_user(tmp, user_wave_data, custom_data.length)) {
-		kfree(tmp);
-		ret = -EFAULT;
-		goto exit;
-	}
-
-	kfifo_in(&haptic_data->stream_fifo, tmp, custom_data.length);
-	kfree(tmp);
-
-	haptic_data->preset_custom = true;
-	haptic_data->preset_wave_index = 0;
-	haptic_data->activate_mode = PLAY_MODE_STREAM;
-
-	set_gain(haptic_data, magnitude);
-
-exit:
-	mutex_unlock(&haptic_data->preset_lock);
-
-	return ret;
-}
-
-static int input_upload_effect(struct input_dev *dev, struct ff_effect *effect,
-			       struct ff_effect *old)
-{
-	struct ics_haptic_data *haptic_data = input_get_drvdata(dev);
-	int ret = 0;
-
-	mutex_lock(&haptic_data->lock);
-	switch (effect->type) {
-	case FF_CONSTANT:
-		ret = upload_constant_effect(haptic_data,
-					     effect->replay.length,
-					     effect->u.constant.level);
-		if (ret) {
-			ics_err("Failed to upload constant effect\n");
-			goto exit;
-		}
-
-		break;
-	case FF_PERIODIC:
-		if (effect->u.periodic.waveform != FF_CUSTOM) {
-			ics_err("Only support custom waveforms\n");
-			ret = -EINVAL;
-			goto exit;
-		}
-
-		if (effect->u.periodic.custom_len != sizeof(struct custom_fifo_data)) {
-			ics_err("Only support custom FIFO data\n");
-			ret = -EINVAL;
-			goto exit;
-		}
-
-		ret = upload_custom_effect(haptic_data,
-					   effect->u.periodic.custom_data,
-					   effect->u.periodic.magnitude);
-		if (ret) {
-			ics_err("Failed to upload custom effect\n");
-			goto exit;
-		}
-		break;
-	default:
-		ics_err("Unsupported effect type: %d", effect->type);
-		break;
-	}
-
-exit:
-	mutex_unlock(&haptic_data->lock);
-
-	return 0;
-}
-
-static void input_vibrator_work_handler(struct work_struct *work)
-{
-	struct ics_haptic_data *haptic_data = container_of(work, struct ics_haptic_data, input_vibrator_work);
-
-	if (!haptic_data->state)
-		return;
-
-	switch (haptic_data->activate_mode) {
-	case PLAY_MODE_RAM:
-		schedule_work(&haptic_data->vibrator_work);
-		break;
-	case PLAY_MODE_STANDBY:
-		haptic_data->func->play_stop(haptic_data);
-		break;
-	case PLAY_MODE_STREAM:
-		schedule_work(&haptic_data->preset_work);
-		break;
-	}
-}
-
-static int input_playback(struct input_dev *dev, int effect_id, int val)
-{
-	struct ics_haptic_data *haptic_data = input_get_drvdata(dev);
-
-	if (val > 0)
-		haptic_data->state = 1;
-	if (val <= 0)
-		haptic_data->state = 0;
-
-	queue_work(haptic_data->input_work_queue, &haptic_data->input_vibrator_work);
-
-	return 0;
-}
-
-static int input_erase(struct input_dev *dev, int effect_id)
-{
-	struct ics_haptic_data *haptic_data = input_get_drvdata(dev);
-	haptic_data->activate_mode = PLAY_MODE_STANDBY;
-	return 0;
-}
-
-static void input_set_gain(struct input_dev *dev, uint16_t gain)
-{
-}
-
-static int input_framework_init(struct ics_haptic_data *haptic_data)
-{
-	struct input_dev *input_dev;
-	int ret = 0;
-
-	input_dev = devm_input_allocate_device(haptic_data->dev);
-	if (input_dev == NULL)
-		return -ENOMEM;
-	input_dev->name = "haptic_rt";
-	input_set_drvdata(input_dev, haptic_data);
-	haptic_data->input_dev = input_dev;
-	input_set_capability(input_dev, EV_FF, FF_GAIN);
-	input_set_capability(input_dev, EV_FF, FF_CONSTANT);
-	input_set_capability(input_dev, EV_FF, FF_PERIODIC);
-	input_set_capability(input_dev, EV_FF, FF_CUSTOM);
-	ret = input_ff_create(input_dev, 1);
-	if (ret < 0) {
-		ics_err("create input FF device failed, rc=%d\n", ret);
-		return ret;
-	}
-	input_dev->ff->upload = input_upload_effect;
-	input_dev->ff->playback = input_playback;
-	input_dev->ff->erase = input_erase;
-	input_dev->ff->set_gain = input_set_gain;
-
-	ret = input_register_device(input_dev);
-	if (ret < 0) {
-		ics_err("register input device failed, rc=%d\n", ret);
-		input_ff_destroy(haptic_data->input_dev);
-		return ret;
-	}
-
-	INIT_WORK(&haptic_data->input_vibrator_work, input_vibrator_work_handler);
-	haptic_data->input_work_queue = alloc_workqueue("haptic_input_work_queue", WQ_UNBOUND, 1);
-	if (!haptic_data->input_work_queue) {
-		ics_err("failed to allocate input workqueue\n");
-		input_unregister_device(input_dev);
-		return -ENOMEM;
-	}
-
-	return ret;
-}
-#endif
-
 static enum hrtimer_restart vibrator_timer_func(struct hrtimer *timer)
 {
 	struct ics_haptic_data *haptic_data = container_of(timer, struct ics_haptic_data, timer);
@@ -1050,7 +824,6 @@ static void vibrator_work_routine(struct work_struct *work)
 	uint8_t buf[6];
 
 	mutex_lock(&haptic_data->lock);
-	hrtimer_cancel(&haptic_data->timer);
 	haptic_data->func->play_stop(haptic_data);
 	if (haptic_data->activate_state)
 	{
@@ -1074,13 +847,10 @@ static void preset_work_routine(struct work_struct *work)
 {
 	struct ics_haptic_data *haptic_data = container_of(work, struct ics_haptic_data, preset_work);
 	int32_t ret = 0;
-	const struct firmware *preset_file = NULL;
+	const struct firmware *preset_file;
 	uint32_t chip_fifo_size = haptic_data->list_base_addr;
 
 	mutex_lock(&haptic_data->preset_lock);
-	if (haptic_data->preset_custom)
-		goto skip_firmware_load;
-
 	ret = request_firmware(&preset_file,
 				   preset_waveform_name[haptic_data->preset_wave_index],
 				   haptic_data->dev);
@@ -1103,18 +873,14 @@ static void preset_work_routine(struct work_struct *work)
 	}
 	kfifo_reset(&haptic_data->stream_fifo);
 	kfifo_in(&haptic_data->stream_fifo, preset_file->data, preset_file->size);
-	skip_firmware_load:
 	mutex_unlock(&haptic_data->preset_lock);
 	release_firmware(preset_file);
 
 	mutex_lock(&haptic_data->lock);
 	haptic_data->func->play_stop(haptic_data);
-	haptic_data->func->clear_stream_fifo(haptic_data);
 	haptic_data->func->get_irq_state(haptic_data);
 	haptic_data->func->set_play_mode(haptic_data, PLAY_MODE_STREAM);
 	haptic_data->func->play_go(haptic_data);
-
-	usleep_range(1000, 2000);
 
 	send_stream_data(haptic_data, chip_fifo_size);
 	mutex_unlock(&haptic_data->lock);
@@ -1148,7 +914,7 @@ static void vibrator_enable(struct timed_output_dev *dev, int value)
 	}
 	mutex_unlock(&haptic_data->lock);
 }
-#elif 0
+#else
 static enum led_brightness brightness_get(struct led_classdev *vdev)
 {
 	struct ics_haptic_data *haptic_data = container_of(vdev, struct ics_haptic_data, vib_dev);
@@ -1329,7 +1095,7 @@ static int32_t vibrator_init(struct ics_haptic_data *haptic_data)
 		ics_err("%s: failed to create sysfs attr files!\n", __func__);
 		return ret;
 	}
-#elif 0
+#else
 	ics_info("%s: led cdev framework!\n", __func__);
 	haptic_data->vib_dev.name = haptic_data->vib_name;
 	haptic_data->vib_dev.brightness_get = brightness_get;
@@ -1354,8 +1120,7 @@ static int32_t vibrator_init(struct ics_haptic_data *haptic_data)
 	mutex_init(&haptic_data->lock);
 	mutex_init(&haptic_data->preset_lock);
 	snprintf(haptic_info, sizeof(haptic_info), haptic_data->misc_name);
-
-	return ret;
+	return 0;
 }
 
 static void load_chip_config(const struct firmware *config_fw, void *context)
@@ -1464,7 +1229,6 @@ static int32_t haptic_parse_dt(struct ics_haptic_data *haptic_data)
 		ics_info("provided device name is : %s\n", haptic_data->vib_name);
 	}
 
-#if IS_ENABLED(CONFIG_ICS_HAPTIC_DRV_RICHTAP)
 	if (of_property_read_string(dev_node, "richtap-name", &str_val))
 	{
 		ics_err("%s: can NOT find richtap name in DT!\n", __func__);
@@ -1475,7 +1239,6 @@ static int32_t haptic_parse_dt(struct ics_haptic_data *haptic_data)
 		memcpy(haptic_data->misc_name, str_val, strlen(str_val));
 		ics_info("provided richtap name is : %s\n", haptic_data->misc_name);
 	}
-#endif
 
 	return 0;
 }
@@ -1531,11 +1294,6 @@ static int ics_haptic_probe(struct i2c_client *client, const struct i2c_device_i
 	haptic_data->nt_backup_f0 = INVALID_DATA;
 	dev_set_drvdata(dev, haptic_data);
 	i2c_set_clientdata(client, haptic_data);
-#ifdef ICS_INPUT_FRAMEWORK
-	ret = input_framework_init(haptic_data);
-	if (ret < 0)
-		goto probe_err;
-#endif
 
 	haptic_data->regmap = devm_regmap_init_i2c(client, &ics_haptic_regmap);
 	if (IS_ERR(haptic_data->regmap))
@@ -1596,7 +1354,7 @@ static int ics_haptic_probe(struct i2c_client *client, const struct i2c_device_i
 	initialize_chip(haptic_data);
 
 
-#if IS_ENABLED(CONFIG_HAPTIC_DRV_RICHTAP)
+#ifdef AAC_RICHTAP_SUPPORT
 	ret = richtap_misc_register(haptic_data);
 	if (ret < 0)
 	{
@@ -1655,16 +1413,11 @@ static int ics_haptic_remove(struct i2c_client *client)
 {
 	struct ics_haptic_data *haptic_data = i2c_get_clientdata(client);
 
-#if IS_ENABLED(CONFIG_HAPTIC_DRV_RICHTAP)
+#ifdef AAC_RICHTAP_SUPPORT
 	richtap_misc_remove(haptic_data);
 #endif
 	cancel_work_sync(&haptic_data->preset_work);
 	cancel_work_sync(&haptic_data->vibrator_work);
-#ifdef ICS_INPUT_FRAMEWORK
-	cancel_work_sync(&haptic_data->input_vibrator_work);
-	destroy_workqueue(haptic_data->input_work_queue);
-	input_unregister_device(haptic_data->input_dev);
-#endif
 	hrtimer_cancel(&haptic_data->timer);
 	mutex_destroy(&haptic_data->lock);
 	mutex_destroy(&haptic_data->preset_lock);
@@ -1725,7 +1478,7 @@ static struct i2c_driver ics_haptic_driver = {
 	},
 	.id_table = ics_haptic_id,
 	.probe = ics_haptic_probe,
-	.remove = ics_haptic_remove,
+	.remove = (void *)ics_haptic_remove,
 };
 
 module_i2c_driver(ics_haptic_driver);

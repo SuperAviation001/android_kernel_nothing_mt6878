@@ -38,8 +38,6 @@
 // Private functions.
 //------------------------------------------------------------------------------
 static uint32_t mddp_netdev_notifier_is_init;
-
-unsigned long mddp_abnormal_disabled_jiffies = 0;
 static int mddp_netdev_notify_cb(struct notifier_block *nb,
 				 unsigned long event, void *data)
 {
@@ -142,7 +140,7 @@ int32_t mddp_on_activate(enum mddp_app_type_e type,
 
 	// NG. app is not configured!
 	app = mddp_get_app_inst(type);
-	if (!app->is_config)
+	if ((!app->is_config) || (app->state == MDDP_STATE_DISABLED))
 		return -EINVAL;
 
 	if (!(app->feature & MDDP_FEATURE_MDDP_WH) || !app->drv_reg)
@@ -213,12 +211,11 @@ int32_t mddp_on_disable(enum mddp_app_type_e in_type)
 		return -EINVAL;
 
 	/* If MDDP is not deactivated,
-	 * Deactive first to avoid state machine corruption
+	 * Deactivate first to avoid state machine corruption
 	 */
 	if (mddp_f_dev_is_wan_lan_dev()) {
 		int32_t ret = 0;
 
-		mddp_abnormal_disabled_jiffies = jiffies;
 		ret = mddp_on_deactivate(MDDP_APP_TYPE_WH);
 	}
 
@@ -228,8 +225,6 @@ int32_t mddp_on_disable(enum mddp_app_type_e in_type)
 	for (idx = 0; idx < MDDP_MOD_CNT; idx++) {
 		type = mddp_sm_module_list_s[idx];
 		app = mddp_get_app_inst(type);
-		if (!(app->feature & MDDP_FEATURE_MDDP_WH) || !app->drv_reg)
-			continue;
 		mddp_sm_wait_pre(app);
 		mddp_sm_on_event(app, MDDP_EVT_FUNC_DISABLE);
 		mddp_sm_wait(app, MDDP_EVT_FUNC_DISABLE);

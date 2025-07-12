@@ -243,7 +243,7 @@ const char *rt6010_get_cmd(void)
 			ics_dbg("%s: failed to get bootargs\n", __func__);
 		else {
 			strcpy(__rt6010_cmdline, bootargs);
-			ics_dbg("%s: bootargs: fuck you %s\n", __func__, bootargs);
+			ics_dbg("%s: bootargs: %s\n", __func__, bootargs);
 		}
 	} else
 		ics_dbg("%s: failed to get /chosen\n", __func__);

@@ -9,16 +9,16 @@
 #include <linux/types.h>
 
 #define DEBUG
-#define ICS_INPUT_FRAMEWORK
+#define AAC_RICHTAP_SUPPORT
 
 #define ics_err(format, ...) \
-	pr_info("[ics_haptic] " format, ##__VA_ARGS__)
+	pr_info("[ics_haptic]" format, ##__VA_ARGS__)
 
 #define ics_info(format, ...) \
-	pr_info("[ics_haptic] " format, ##__VA_ARGS__)
+	pr_info("[ics_haptic]" format, ##__VA_ARGS__)
 
 #define ics_dbg(format, ...) \
-	pr_info("[ics_haptic] " format, ##__VA_ARGS__)
+	pr_info("[ics_haptic]" format, ##__VA_ARGS__)
 
 #define check_error_return(ret)	\
 	if (ret < 0) {	\
@@ -46,9 +46,9 @@ typedef struct led_classdev vib_dev_t;
 
 enum ics_haptic_play_mode
 {
-	PLAY_MODE_STANDBY	= 0x00,
-	PLAY_MODE_RAM		= 0x01,
-	PLAY_MODE_STREAM	= 0x02,
+	PLAY_MODE_RAM		   = 0x01,
+	PLAY_MODE_STREAM		= 0x02,
+	PLAY_MODE_TRACK		 = 0x03,
 };
 
 enum ics_haptic_boost_mode
@@ -144,14 +144,6 @@ struct ics_haptic_data
 	uint32_t config_size;
 	uint32_t nt_backup_f0;//Write the value of MMI calibration f0 in the upper layer
 	uint32_t nt_cmdline_f0;//record lk stage f0 exceeding threshold
-#ifdef ICS_INPUT_FRAMEWORK
-	struct input_dev *input_dev;
-	struct workqueue_struct *input_work_queue;
-	struct work_struct input_vibrator_work;
-	enum ics_haptic_play_mode activate_mode;
-	int32_t state;
-	bool preset_custom;
-#endif
 };
 
 struct ics_haptic_func
@@ -190,7 +182,7 @@ struct ics_haptic_func
 
 extern struct ics_haptic_func rt6010_func_list;
 
-#if IS_ENABLED(CONFIG_HAPTIC_DRV_RICHTAP)
+#ifdef AAC_RICHTAP_SUPPORT
 #define DEFAULT_RICHTAP_NAME	"aac_richtap"
 extern int32_t richtap_misc_register(struct ics_haptic_data *haptic_data);
 extern int32_t richtap_misc_remove(struct ics_haptic_data *haptic_data);
